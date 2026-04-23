@@ -1448,6 +1448,10 @@ async function init() {
     renderLegs();
     updateSyncStatus();
     loadFromSheet();
+    // Route to role-appropriate tab (same as loginUser does)
+    if (currentRole === 'owner')         showTab('owner',    document.getElementById('tab-btn-owner'));
+    else if (currentRole === 'employee') showTab('approval', document.getElementById('tab-btn-approval'));
+    else                                  showTab('add',      document.getElementById('tab-btn-add'));
   }
 }
 
@@ -1455,35 +1459,34 @@ async function loadFromSheet() {
   if(!sheetUrl) return;
   showLoadingOverlay(true);
   try {
-    // Refresh closed-months cache in the background (all roles benefit)
     fetchClosedMonths().catch(()=>{});
-    if(currentRole==='owner'||currentRole==='supervisor') {
+
+    // Employee (approver) and Owner need to see all trips
+    // Transporter needs to see only trips+advances for their linked transporter
+    if(currentRole === 'owner' || currentRole === 'employee') {
       const res = await fetch(sheetUrl + '?action=getAll');
       const data = await res.json();
       if(data.success && data.expenses) {
         expenses = data.expenses.map(e=>({...e, id: Number(e.id)||e.id, photos:[]}));
       }
+    } else if(currentRole === 'transporter' && currentUserTransporter) {
+      // Fetch all and filter client-side by transporter name (sheet doesn't
+      // have a getByTransporter endpoint; getAll is cheap enough here)
+      const res = await fetch(sheetUrl + '?action=getAll');
+      const data = await res.json();
+      if(data.success && data.expenses) {
+        const tName = currentUserTransporter.trim().toLowerCase();
+        expenses = data.expenses
+          .filter(e => (e.transporter||'').trim().toLowerCase() === tName)
+          .map(e => ({...e, id: Number(e.id)||e.id, photos:[]}));
+      }
     } else {
-      const [expRes, advRes] = await Promise.all([
-        fetch(sheetUrl + '?action=getByStaff&staff=' + encodeURIComponent(currentUser)),
-        fetch(sheetUrl + '?action=getAll')
-      ]);
-      const expData = await expRes.json();
-      const advData = await advRes.json();
-
-      let myExpenses = [];
-      if(expData.success && expData.expenses) {
-        myExpenses = expData.expenses.map(e=>({...e, id: Number(e.id)||e.id, photos:[]}));
+      // Fallback — fetch own trips by staff (legacy path, shouldn't hit in new model)
+      const res = await fetch(sheetUrl + '?action=getByStaff&staff=' + encodeURIComponent(currentUser));
+      const data = await res.json();
+      if(data.success && data.expenses) {
+        expenses = data.expenses.map(e=>({...e, id: Number(e.id)||e.id, photos:[]}));
       }
-      if(advData.success && advData.expenses) {
-        const allAdvances = advData.expenses
-          .filter(e=>e.status==='advance' &&
-            e.staff.trim().toLowerCase()===currentUser.trim().toLowerCase())
-          .map(e=>({...e, id: Number(e.id)||e.id, photos:[]}));
-        const myIds = new Set(myExpenses.map(e=>String(e.id)));
-        allAdvances.forEach(a=>{ if(!myIds.has(String(a.id))) myExpenses.push(a); });
-      }
-      expenses = myExpenses;
     }
   } catch(err) {
     showGlobalNotice('Could not load from sheet. Check connection.','error');
@@ -2012,10 +2015,13 @@ function renderSummary() {
   const myPending = mine.filter(e=>e.status==='pending').length;
   let approvalPending = 0;
   if (currentRole === 'employee') {
-    approvalPending = expenses.filter(e => e.role === 'transporter' && e.status === 'pending' && e.amount <= 3000).length;
+    approvalPending = expenses.filter(e =>
+      (e.role === 'transporter' || !e.role || e.role === 'employee') &&
+      e.status === 'pending' && e.amount <= 3000
+    ).length;
   } else if (currentRole === 'owner') {
-    approvalPending = expenses.filter(e => e.role === 'transporter' && e.status === 'pending' && e.amount > 3000).length
-                    + expenses.filter(e => e.status === 'advance-unconfirmed').length; // unconfirmed advances
+    approvalPending = expenses.filter(e => e.status === 'pending' && e.amount > 3000).length
+                    + expenses.filter(e => e.status === 'advance-unconfirmed').length;
   } else {
     approvalPending = myPending;
   }
@@ -2175,11 +2181,15 @@ function renderApproval() {
   const allPending = expenses.filter(e=>e.status==='pending');
   let pending = [];
   if (currentRole === 'employee') {
-    // Employee approves transporter trips up to ₹3,000
-    pending = allPending.filter(e => e.role === 'transporter' && e.amount <= 3000);
+    // Employee approves trips up to ₹3,000
+    // Role field may be missing on older rows — include them too
+    pending = allPending.filter(e =>
+      (e.role === 'transporter' || !e.role || e.role === 'employee') &&
+      e.amount <= 3000
+    );
   } else if (currentRole === 'owner') {
-    // Owner approves transporter trips above ₹3,000
-    pending = allPending.filter(e => e.role === 'transporter' && e.amount > 3000);
+    // Owner approves trips above ₹3,000 (regardless of submitter role)
+    pending = allPending.filter(e => e.amount > 3000);
   }
   const tb = document.getElementById('appr-tbody');
   const empty = document.getElementById('appr-empty');
