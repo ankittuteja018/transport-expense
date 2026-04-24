@@ -1406,8 +1406,8 @@ async function init() {
   const dateEl = document.getElementById('i-date');
   if(dateEl){ dateEl.value = todayStr(); dateEl.max = todayStr(); }
 
-  // Default sheet URL — user should override in Settings
-  sheetUrl = 'https://script.google.com/macros/s/AKfycbxu5aJWCwAyRl0jX75f0vlMVkoGRhMlvKEQ-W7StrN9gclk0ZgE5nSfr7G810FEw5jU/exec';
+  // Default sheet URL — can be overridden per-device in Settings
+  sheetUrl = 'https://script.google.com/macros/s/AKfycbyvWaY2o-j8qtdaugNOEA5Bf9WvPCVvk0rNgZugRgvxrJwh538qlpzoiTM9M-K1gAjX/exec';
   try {
     const savedUrl = localStorage.getItem('tet_sheet_url');
     if(savedUrl) sheetUrl = savedUrl;
