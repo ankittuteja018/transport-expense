@@ -182,7 +182,8 @@ select.sel{cursor:pointer;-webkit-appearance:none;appearance:none;background-ima
         <button onclick="var el=document.getElementById('l-pass');el.type=el.type==='password'?'text':'password';this.textContent=el.type==='password'?'Show':'Hide'" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;outline:none;cursor:pointer;color:var(--text3);font-size:12px;font-weight:600;padding:4px 6px;border-radius:4px">Show</button>
       </div>
     </div>
-    <button class="login-btn" onclick="doLogin()">Sign In</button>
+    <button class="login-btn" id="login-btn" onclick="doLogin()">Sign In</button>
+    <div id="login-loading" style="display:none;text-align:center;font-size:13px;color:var(--text2);margin-top:8px">Loading users from sheet...</div>
     <div class="login-error" id="l-err">Invalid username or password</div>
   </div>
 </div>
@@ -576,14 +577,23 @@ const ADVANCES_KEY='aaray_advances';
 const SHEET_URL_KEY='aaray_sheet_url';
 const DRIVE_FOLDER_KEY='aaray_drive_folder';
 
+// ← PASTE YOUR WEB APP URL BETWEEN THE QUOTES BELOW
+const BAKED_SHEET_URL='https://script.google.com/macros/s/AKfycbyvWaY2o-j8qtdaugNOEA5Bf9WvPCVvk0rNgZugRgvxrJwh538qlpzoiTM9M-K1gAjX/exec';
+
+function getSheetUrl(){return BAKED_SHEET_URL||localStorage.getItem(SHEET_URL_KEY)||'';}
+function getDriveFolderId(){return localStorage.getItem(DRIVE_FOLDER_KEY)||'';}
+
 const DEFAULT_USERS=[
   {username:'ankit',password:'admin123',role:'owner',name:'Ankit'},
   {username:'sharma',password:'trans123',role:'transporter',name:'Sharma Transport'}
 ];
 
-function getUsers(){return JSON.parse(localStorage.getItem(USERS_KEY)||JSON.stringify(DEFAULT_USERS));}
-function getSheetUrl(){return localStorage.getItem(SHEET_URL_KEY)||'';}
-function getDriveFolderId(){return localStorage.getItem(DRIVE_FOLDER_KEY)||'';}
+// Users come from Google Sheet — falls back to defaults if sheet not loaded yet
+function getUsers(){
+  const stored=JSON.parse(localStorage.getItem(USERS_KEY)||'[]');
+  return stored.length?stored:DEFAULT_USERS;
+}
+function saveUsers(users){localStorage.setItem(USERS_KEY,JSON.stringify(users));postToSheet({action:'saveUsers',users});}
 
 let entries=JSON.parse(localStorage.getItem(STORAGE)||'[]');
 let advances=JSON.parse(localStorage.getItem(ADVANCES_KEY)||'[]');
@@ -712,6 +722,11 @@ function doGet(e) {
       return ok({ success: true, advances: advs });
     }
 
+    // Get all users
+    if (p.action === 'getUsers') {
+      return ok({ success: true, users: getUsers_() });
+    }
+
     return ok({ success: true, message: "Connected!" });
   } catch(err) {
     return ok({ success: false, error: err.toString() });
@@ -769,7 +784,13 @@ function doPost(e) {
     var expSh = getOrCreateSheet(EXPENSES_SHEET, EXP_HEADERS);
     var advSh = getOrCreateSheet(ADVANCES_SHEET, ADV_HEADERS);
 
-    // ── Upsert single expense ──────────────────────────────────────────
+    // Save users
+    if (data.action === 'saveUsers') {
+      saveUsers_(data.users);
+      return ok({ success: true });
+    }
+
+    // Upsert single expense
     if (data.action === 'upsertExpense') {
       var d = data.expense;
       var photoUrl = d.photoUrl || '';
@@ -851,6 +872,30 @@ function doPost(e) {
   } catch(err) {
     return ok({ success: false, error: err.toString() });
   }
+}
+
+// ── Users sheet ───────────────────────────────────────────────────────
+const USERS_SHEET = "Users";
+const USER_HEADERS = ["Username","Password","Role","Name"];
+
+function getUsers_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(USERS_SHEET);
+  if(!sh) return [];
+  var last = sh.getLastRow();
+  if(last < 2) return [];
+  var rows = sh.getRange(2, 1, last-1, 4).getValues();
+  return rows.filter(r=>r[0]).map(r=>({username:r[0],password:r[1],role:r[2],name:r[3]}));
+}
+
+function saveUsers_(users) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(USERS_SHEET) || ss.insertSheet(USERS_SHEET);
+  sh.clearContents();
+  sh.appendRow(USER_HEADERS);
+  users.forEach(function(u) {
+    sh.appendRow([u.username, u.password, u.role, u.name]);
+  });
 }
 `;
 
@@ -1008,7 +1053,7 @@ function addUserForm(){
   const users=getUsers();
   if(users.find(x=>x.username.toLowerCase()===u.toLowerCase())){msg.style.color='var(--red)';msg.textContent='Username already exists.';return;}
   users.push({username:u,password:p,role:r,name:n});
-  localStorage.setItem(USERS_KEY,JSON.stringify(users));
+  saveUsers(users);
   renderUserList();
   document.getElementById('nu-user').value='';
   document.getElementById('nu-pass').value='';
@@ -1025,13 +1070,13 @@ function resetUserPw(i){
   const pw=prompt('Enter new password for '+users[i].name+':');
   if(!pw||!pw.trim())return;
   users[i].password=pw.trim();
-  localStorage.setItem(USERS_KEY,JSON.stringify(users));
+  saveUsers(users);
   alert('✓ Password updated for '+users[i].name);
 }
 
 function removeUser(i){
   const users=getUsers();users.splice(i,1);
-  localStorage.setItem(USERS_KEY,JSON.stringify(users));renderUserList();
+  saveUsers(users);renderUserList();
 }
 
 // ── Sheet communication ───────────────────────────────────────────────
@@ -1072,6 +1117,12 @@ async function pullFromSheet(){
   if(!url||!curUser)return;
   showSyncStatus('Loading from sheet...');
   try{
+    // Load users
+    const usersData=await getFromSheet({action:'getUsers'});
+    if(usersData&&usersData.success&&usersData.users&&usersData.users.length){
+      localStorage.setItem(USERS_KEY,JSON.stringify(usersData.users));
+    }
+    // Load expenses
     let data;
     if(curUser.role==='owner'){
       data=await getFromSheet({action:'getAll'});
@@ -1079,19 +1130,18 @@ async function pullFromSheet(){
       data=await getFromSheet({action:'getByTransporter',transporter:curUser.name});
     }
     if(data&&data.success&&data.expenses&&data.expenses.length){
-      const localById={};
-      entries.forEach(e=>localById[e.id]=e);
       const sheetIds=new Set(data.expenses.map(e=>String(e.id)));
       const localOnly=entries.filter(e=>!sheetIds.has(String(e.id)));
       entries=[...data.expenses,...localOnly];
       save();
     }
+    // Load advances
     const advData=await getFromSheet({action:'getAdvances'});
     if(advData&&advData.success&&advData.advances&&advData.advances.length){
       advances=advData.advances;
       saveAdvances();
     }
-    showSyncStatus('✓ Loaded from sheet');
+    showSyncStatus('✓ Synced');
     renderLog();updateTransporterBalance();
   }catch(err){
     showSyncStatus('Using local data');
@@ -1515,38 +1565,47 @@ function switchMain(name,el){
 }
 
 // Auto-login if session exists
-// Migrate owner username from 'admin'/'Admin (Owner)' to 'ankit'/'Ankit'
+// Migrate advances recordedBy
 (function(){
-  const users=JSON.parse(localStorage.getItem(USERS_KEY)||'null');
-  if(users){
-    let changed=false;
-    users.forEach(u=>{
-      if(u.role==='owner'&&(u.username==='admin'||u.name==='Admin (Owner)')){
-        u.username='ankit';u.name='Ankit';changed=true;
-      }
-    });
-    if(changed) localStorage.setItem(USERS_KEY,JSON.stringify(users));
-  }
-  // Fix advances recordedBy
   const adv=JSON.parse(localStorage.getItem(ADVANCES_KEY)||'[]');
   let advChanged=false;
   adv.forEach(a=>{
     if(a.recordedBy==='Admin (Owner)'||a.recordedBy==='admin'){a.recordedBy='Ankit';advChanged=true;}
   });
   if(advChanged) localStorage.setItem(ADVANCES_KEY,JSON.stringify(adv));
-  // Also fix session if logged in as old admin
-  const s=sessionStorage.getItem('aaray_session');
-  if(s){
-    const u=JSON.parse(s);
-    if(u.role==='owner'&&(u.username==='admin'||u.name==='Admin (Owner)')){
-      u.username='ankit';u.name='Ankit';
-      sessionStorage.setItem('aaray_session',JSON.stringify(u));
+})();
+
+// On page load — fetch users from sheet, then check session
+(async function init(){
+  const url=getSheetUrl();
+  if(url){
+    document.getElementById('login-loading').style.display='block';
+    document.getElementById('login-btn').disabled=true;
+    try{
+      const controller=new AbortController();
+      setTimeout(()=>controller.abort(),8000);
+      const res=await fetch(url+'?action=getUsers',{signal:controller.signal});
+      const data=await res.json();
+      if(data&&data.success&&data.users&&data.users.length){
+        localStorage.setItem(USERS_KEY,JSON.stringify(data.users));
+      }
+    }catch(e){}
+    document.getElementById('login-loading').style.display='none';
+    document.getElementById('login-btn').disabled=false;
+  }
+  const sess=sessionStorage.getItem('aaray_session');
+  if(sess){
+    const u=JSON.parse(sess);
+    // Verify user still exists in sheet users
+    const users=getUsers();
+    const stillValid=users.length===0||users.find(x=>x.username===u.username&&x.role===u.role);
+    if(stillValid){
+      curUser=u;curRole=u.role;showApp();updateTransporterBalance();pullFromSheet();
+    } else {
+      sessionStorage.removeItem('aaray_session');
     }
   }
 })();
-
-const sess=sessionStorage.getItem('aaray_session');
-if(sess){curUser=JSON.parse(sess);curRole=curUser.role;showApp();updateTransporterBalance();pullFromSheet();}
 </script>
 </body>
 </html>
