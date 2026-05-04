@@ -407,7 +407,7 @@ body.dark .expense-summary-row.total{background:rgba(2,128,144,.2)}
         <table>
           <thead><tr>
             <th style="width:32px"><input type="checkbox" id="log-chk-all" onchange="toggleLogChecks(this)"></th>
-            <th>Ref</th><th>Date</th><th>Staff</th><th>Transporter</th><th>Bilti</th><th>Vehicle</th>
+            <th>Ref</th><th>Date</th><th>Staff</th><th>Transporter</th><th>Invoice</th><th>Vehicle</th>
             <th>Route</th><th style="text-align:right">KM</th><th style="text-align:right">Amount</th>
             <th>Status</th><th>Proof</th><th></th>
           </tr></thead>
@@ -2159,7 +2159,7 @@ function renderLog() {
       <td style="color:var(--text-muted);font-size:11.5px;white-space:nowrap">${fmtDate(e.date)}</td>
       <td style="font-weight:600">${escapeHtml(e.staff)}</td>
       <td style="color:var(--text-muted)">${escapeHtml(e.transporter||'—')}</td>
-      <td style="font-size:11px;color:var(--text-muted)">${escapeHtml(e.bilti||'—')}</td>
+      <td style="font-size:11px;color:var(--text-muted)">${escapeHtml(e.vinv||'—')}</td>
       <td>${vehicleBadge(e.vehicleType)}</td>
       <td style="color:var(--text-muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(e.route||'')}">${escapeHtml(e.route||'—')}</td>
       <td style="text-align:right;font-size:11.5px">${e.distance||0}</td>
