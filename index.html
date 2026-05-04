@@ -1573,10 +1573,42 @@ function renderLegs() {
   const origins = originLocations();
   const dests = destinationLocations();
   const invoice = document.getElementById('i-vinv')?.value || '';
+
+  // Helper: figure out what the dropdown should show vs what the text input should show
+  // If leg.from matches a known location → dropdown=that name, no text input
+  // If leg.from is "Others" or a custom value not in list → dropdown="Others", text input shows typed value
+  const resolveDropdownVal = (currentVal, list) => {
+    if (!currentVal) return { dropdown: '', custom: '' };
+    if (currentVal === 'Others') return { dropdown: 'Others', custom: '' };
+    const known = list.find(l => l.name === currentVal);
+    if (known) return { dropdown: currentVal, custom: '' };
+    // Unknown → must be a custom "Others" value
+    return { dropdown: 'Others', custom: currentVal };
+  };
+
   container.innerHTML = formLegs.map((leg, idx) => {
     const removeBtn = formLegs.length > 1
       ? `<button class="leg-remove-inline" onclick="removeLeg(${idx})" title="Remove leg">✕ Remove</button>`
       : '';
+
+    const fromR = resolveDropdownVal(leg.from, origins);
+    const toR   = resolveDropdownVal(leg.to,   dests);
+
+    // Build From-side HTML (dropdown + optional text input)
+    const fromOptions = origins.map(l =>
+      `<option value="${escapeHtml(l.name)}" ${fromR.dropdown===l.name?'selected':''}>${escapeHtml(l.name)}</option>`
+    ).join('');
+    const fromTextField = fromR.dropdown === 'Others'
+      ? `<input type="text" placeholder="Type origin name" value="${escapeHtml(fromR.custom)}" style="margin-top:8px" oninput="updateLegCustom(${idx},'from',this.value)">`
+      : '';
+
+    const toOptions = dests.map(l =>
+      `<option value="${escapeHtml(l.name)}" ${toR.dropdown===l.name?'selected':''}>${escapeHtml(l.name)}</option>`
+    ).join('');
+    const toTextField = toR.dropdown === 'Others'
+      ? `<input type="text" placeholder="Type destination name" value="${escapeHtml(toR.custom)}" style="margin-top:8px" oninput="updateLegCustom(${idx},'to',this.value)">`
+      : '';
+
     // For leg 1 the second row shows Distance + Invoice Number
     // For legs 2+ the second row shows only Distance (no invoice)
     const secondRow = idx === 0
@@ -1606,17 +1638,19 @@ function renderLegs() {
       <div class="form-row r2">
         <div class="fg">
           <label>From (Origin) <span class="req">*</span></label>
-          <select onchange="updateLeg(${idx},'from',this.value)">
+          <select onchange="updateLegDropdown(${idx},'from',this.value)">
             <option value="">Select Origin</option>
-            ${origins.map(l=>`<option value="${escapeHtml(l.name)}" ${leg.from===l.name?'selected':''}>${escapeHtml(l.name)}</option>`).join('')}
+            ${fromOptions}
           </select>
+          ${fromTextField}
         </div>
         <div class="fg">
           <label>To (Destination) <span class="req">*</span></label>
-          <select onchange="updateLeg(${idx},'to',this.value)">
+          <select onchange="updateLegDropdown(${idx},'to',this.value)">
             <option value="">Select Destination</option>
-            ${dests.map(l=>`<option value="${escapeHtml(l.name)}" ${leg.to===l.name?'selected':''}>${escapeHtml(l.name)}</option>`).join('')}
+            ${toOptions}
           </select>
+          ${toTextField}
         </div>
       </div>
       ${secondRow}
@@ -1627,6 +1661,32 @@ function renderLegs() {
 function updateLeg(idx, field, value) {
   if(!formLegs[idx]) return;
   formLegs[idx][field] = value;
+}
+
+// When dropdown changes: handle "Others" specially by re-rendering so the text field appears
+function updateLegDropdown(idx, field, value) {
+  if(!formLegs[idx]) return;
+  if (value === 'Others') {
+    // Pick "Others" — clear stored value and re-render to reveal text input
+    formLegs[idx][field] = 'Others';
+    renderLegs();
+  } else if (value === '') {
+    formLegs[idx][field] = '';
+    renderLegs();
+  } else {
+    // Known location chosen — was previously Others? Re-render to hide text input
+    const prevWasOthers = (formLegs[idx][field] === 'Others') ||
+                          (formLegs[idx][field] && !originLocations().concat(destinationLocations()).some(l=>l.name===formLegs[idx][field]));
+    formLegs[idx][field] = value;
+    if (prevWasOthers) renderLegs();
+  }
+}
+
+// User typing in the "Others" text field — replace stored value with typed text
+function updateLegCustom(idx, field, value) {
+  if(!formLegs[idx]) return;
+  // Empty input keeps the placeholder "Others" — non-empty replaces it
+  formLegs[idx][field] = value.trim() || 'Others';
 }
 
 function addLeg() {
@@ -1783,6 +1843,8 @@ async function addTrip() {
     const leg = formLegs[i];
     if(!leg.from) { alert('Leg '+(i+1)+': Please select origin.'); return; }
     if(!leg.to)   { alert('Leg '+(i+1)+': Please select destination.'); return; }
+    if(leg.from === 'Others') { alert('Leg '+(i+1)+': Please type the origin name in the text box.'); return; }
+    if(leg.to   === 'Others') { alert('Leg '+(i+1)+': Please type the destination name in the text box.'); return; }
     if(leg.from === leg.to) { alert('Leg '+(i+1)+': Origin and destination cannot be the same.'); return; }
     if(!leg.distance||leg.distance<=0){ alert('Leg '+(i+1)+': Enter a valid distance.'); return; }
   }
