@@ -2531,11 +2531,12 @@ function updateSyncStatus() {
 // ══════════════════════════════════════════════════════════════════════════════
 // PUSH TO SHEET + PHOTO UPLOAD
 // ══════════════════════════════════════════════════════════════════════════════
-async function compressPhoto(dataUrl, maxWidth=400, quality=0.5) {
+async function compressPhoto(dataUrl, maxWidth=1600, quality=0.85) {
   return new Promise(resolve => {
     const img = new Image();
     img.onload = () => {
       const canvas = document.createElement('canvas');
+      // Only downscale if image is larger than maxWidth in either dimension
       const ratio = Math.min(maxWidth / img.width, maxWidth / img.height, 1);
       canvas.width = Math.round(img.width * ratio);
       canvas.height = Math.round(img.height * ratio);
